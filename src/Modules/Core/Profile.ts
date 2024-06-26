@@ -85,7 +85,7 @@ export default class Profile extends Module{
             target = await this.bot.users.get(userId);
         }
         if(!target) {
-            target = await this.bot.users.createFromDiscord(interaction.user);
+            target = await this.bot.users.createFromDiscord(target_user);
         }
 
         await interaction.reply({embeds: [this.createMessageTemplate(target)]});

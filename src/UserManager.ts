@@ -1,16 +1,16 @@
 import Discord from "discord.js";
 
-import { Op, Transaction } from "sequelize";
-import { sequelize } from "./Database";
-import { StorageUserDiscordInfo } from "./Models/StorageUserDiscordInfo";
-import { StorageUserEconomyInfo } from "./Models/StorageUserEconomyInfo";
-import { StorageUser } from "./Models/StorageUser";
+import {Op, Transaction} from "sequelize";
+import {sequelize} from "./Database";
+import {StorageUserDiscordInfo} from "./Models/StorageUserDiscordInfo";
+import {StorageUserEconomyInfo} from "./Models/StorageUserEconomyInfo";
+import {StorageUser} from "./Models/StorageUser";
 
-import { GlobalLogger } from "./GlobalLogger";
+import {GlobalLogger} from "./GlobalLogger";
 import Synergy from "./Synergy";
-import User, { UserOptions } from "./Structures/User";
-import { Access, UnifiedIdString } from ".";
-import { UserAlreadyExistError } from "./Structures/Errors";
+import User, {UserOptions} from "./Structures/User";
+import {Access, UnifiedIdString} from ".";
+import {UserAlreadyExistError} from "./Structures/Errors";
 import CachedManager from "./Structures/CachedManager";
 
 export default class UserManager extends CachedManager<User>{
@@ -37,6 +37,27 @@ export default class UserManager extends CachedManager<User>{
         if(entry) {
             return entry[0];
         }
+    }
+
+    /**
+     * Set custom id association
+     *
+     * #USE ONLY IF YOU KNOW WHAT YOU'RE DOING!!!
+     * @param unifiedId
+     * @param id
+     */
+    public setDiscordIdAssociation(id: Discord.Snowflake, unifiedId: UnifiedIdString) {
+        this.discordIdsAssociations.set(id, unifiedId);
+    }
+
+    /**
+     * Delete id association
+     *
+     * #USE ONLY IF YOU KNOW WHAT YOU'RE DOING!!!
+     * @param id
+     */
+    public deleteDiscordIdAssociation(id: Discord.Snowflake) {
+        this.discordIdsAssociations.delete(id);
     }
 
     /**
@@ -124,6 +145,13 @@ export default class UserManager extends CachedManager<User>{
             unifiedId: storageUser.unifiedId
         });
 
+        await StorageUserEconomyInfo.create({
+            unifiedId: storageUser.unifiedId,
+            economyPoints: user.economy.points,
+            economyLVL: user.economy.lvl,
+            economyXP: user.economy.xp,
+        } as StorageUserEconomyInfo);
+
         this.cacheStorage.set(user.unifiedId, user);
         if(user.discord) {
             this.discordIdsAssociations.set(user.discord.id, user.unifiedId);
@@ -147,14 +175,23 @@ export default class UserManager extends CachedManager<User>{
         }, system);
 
         user.bindDiscord(dUser);
+
+        if(user.discord) {
+            await StorageUserDiscordInfo.create({
+                unifiedId: user.unifiedId,
+                discordId: user.discord.id,
+                discordTag: user.discord.tag,
+                discordAvatar: user.discord.avatar,
+                discordBanner: user.discord.banner,
+                discordCreatedAt: user.discord.createdAt,
+            } as StorageUserDiscordInfo);
+        }
+
         this.discordIdsAssociations.set(dUser.id, user.unifiedId);
         return user;
     }
 
-    public async forceStorageUpdate(unifiedId: UnifiedIdString, transaction?: Transaction) {
-        let user = await this.get(unifiedId);
-        if(!user) return;
-
+    public async forceStorageUpdate(user: User, transaction?: Transaction) {
         let t = transaction;
         if(!t) {
             t = await sequelize().transaction();
@@ -198,7 +235,7 @@ export default class UserManager extends CachedManager<User>{
                 await t.commit();
             }
         } catch(e) {
-            GlobalLogger.root.warn("UserManager.forceStorageUpdate Error:", e);
+            GlobalLogger.root.error("UserManager.forceStorageUpdate Error:", e, "\nTransaction:", t);
             if (!transaction) {
                 await t.rollback();
             }
@@ -214,12 +251,16 @@ export default class UserManager extends CachedManager<User>{
 
     public override async destroy() {
         for(let k of this.cacheStorage.keys()) {
-            await this.onCacheEntryDeleted(k, this.cacheStorage.get(k)!);
+            try {
+                await this.onCacheEntryDeleted(k, this.cacheStorage.get(k)!);
+            } catch (e) {
+                GlobalLogger.root.error("UserManager.destroy entry with key", k, "failed:", e);
+            }
         }
         await super.destroy();
     }
 
     private async onCacheEntryDeleted(unifiedId: UnifiedIdString, user: User) {
-        await this.forceStorageUpdate(unifiedId);
+        await this.forceStorageUpdate(user);
     }
 }

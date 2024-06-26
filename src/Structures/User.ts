@@ -82,17 +82,29 @@ export default class User implements UserOptions{
             };
         }
 
+        let economyOpts: UserEconomyOptions;
+
+        if(storageUser.economy) {
+            economyOpts = {
+                points: storageUser.economy.economyPoints,
+                lvl: storageUser.economy.economyLVL,
+                xp: storageUser.economy.economyXP
+            }
+        } else {
+            economyOpts = bot.options.userDefaultEconomy ?? {
+                points: 0.0005,
+                lvl: 1,
+                xp: 0
+            }
+        }
+
         return new User(bot, {
             unifiedId: storageUser.unifiedId,
             nickname: storageUser.nickname,
             groups: storageUser.groups,
             lang: storageUser.lang,
             discord: discordOpts,
-            economy: {
-                points: storageUser.economy.economyPoints,
-                lvl: storageUser.economy.economyLVL,
-                xp: storageUser.economy.economyXP
-            }
+            economy: economyOpts
         });
     }
 }

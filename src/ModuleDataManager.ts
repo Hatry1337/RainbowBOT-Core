@@ -72,54 +72,49 @@ export default class ModuleDataManager{
         this.bot.events.once("Stop", () => { clearInterval(this.timer); });
     }
 
-    public getContainer(uuid: string) {
-        return new Promise<ModuleDataContainer>(async (resolve, reject) => {
-            let container = dataContainers.get(uuid);
-            if(container){
-                return resolve(container);
-            }
-            
-            StorageModuleDataContainer.findOrCreate({
-                where: {
-                    uuid
-                },
-                defaults: {
-                    uuid: uuid,
-                    kvData: {}
-                } as StorageModuleDataContainer
-            }).then(async storage_container => {
-                container = new ModuleDataContainer(this.bot, uuid, storage_container[0].kvData);
-                dataContainers.set(uuid, container);
-                return resolve(container);
-            }).catch(reject);
-        });
+    public async getContainer(uuid: string) {
+        let container = dataContainers.get(uuid);
+        if(container){
+            return container;
+        }
+
+        let storageContainer = await StorageModuleDataContainer.findOrCreate({
+            where: {
+                uuid
+            },
+            defaults: {
+                uuid: uuid,
+                kvData: {}
+            } as StorageModuleDataContainer
+        })
+        container = new ModuleDataContainer(this.bot, uuid, storageContainer[0].kvData);
+        dataContainers.set(uuid, container);
+        return container;
     }
 
     /**
      * Don't execute this function directly! It is for internal calls 
      */
-    public _loadFromStorage() {
-        return new Promise<void>(async (resolve, reject) => {
-            StorageModuleDataContainer.findAll().then(async containers => {
-                for(let c of containers){
-                    dataContainers.set(c.uuid, new ModuleDataContainer(this.bot, c.uuid, c.kvData));
-                }
-                return resolve();
-            }).catch(reject);
-        });
+    public async _loadFromStorage() {
+        let containers = await StorageModuleDataContainer.findAll();
+        for(let c of containers){
+            dataContainers.set(c.uuid, new ModuleDataContainer(this.bot, c.uuid, c.kvData));
+        }
     }
 
     /**
      * Don't execute this function directly! It is for internal calls 
      */
-    public _syncStorage(){
-        return new Promise<void>(async (resolve) => {
-            GlobalLogger.root.info("[ModuleDataManager] Saving data to storage...");
-            let t = await sequelize().transaction();
-            for(let c of dataContainers){
-                let mdata = moduleDatas.get(c[0]);
-                if(!mdata) continue;
+    public async _syncStorage(){
+        GlobalLogger.root.info("[ModuleDataManager] Saving data to storage...");
 
+        let t = await sequelize().transaction();
+
+        for(let c of dataContainers){
+            let mdata = moduleDatas.get(c[0]);
+            if(!mdata) continue;
+
+            try {
                 await StorageModuleDataContainer.update({
                     kvData: mdata
                 }, {
@@ -127,11 +122,17 @@ export default class ModuleDataManager{
                         uuid: c[0]
                     },
                     transaction: t
-                }).catch(err => GlobalLogger.root.warn("ModuleDataManager.syncStorage Error Updating StorageModuleDataContainer:", err));
-
+                });
+            } catch (e) {
+                GlobalLogger.root.error(`ModuleDataManager._syncStorage Error updating container "${c[0]}":`, e);
             }
-            await t.commit().catch(err => GlobalLogger.root.error("ModuleDataManager.syncStorage Error Committing:", err));
-            return resolve();
-        });
+        }
+
+        try {
+            await t.commit();
+        } catch (e) {
+            GlobalLogger.root.error("ModuleDataManager.syncStorage Error committing transaction:", e, "\nTransaction:", t);
+            await t.rollback();
+        }
     }
 }

@@ -1,6 +1,6 @@
 import Discord from "discord.js";
 
-import { Op } from "sequelize";
+import { Op, Transaction } from "sequelize";
 import { sequelize } from "./Database";
 
 import { GlobalLogger } from "./GlobalLogger";
@@ -90,37 +90,38 @@ export default class GuildManager extends CachedManager<Guild> {
     }
 
     public override async destroy() {
-        for(let k of this.cacheStorage.keys()) {
-            await this.onCacheEntryDeleted(k, this.cacheStorage.get(k)!);
-        }
-        await super.destroy();
-    }
-
-    private async onCacheEntryDeleted(discordId: string, guild: Guild) {
         let t = await sequelize().transaction();
 
+        for(let k of this.cacheStorage.keys()) {
+            await this.onCacheEntryDeleted(k, this.cacheStorage.get(k)!, t);
+        }
+
         try {
-            await StorageGuild.update({
-                id: guild.id,
-                group: guild.group,
-                name: guild.name,
-                lang: guild.lang,
-                ownerId: guild.ownerId,
-                icon: guild.icon,
-                banner: guild.banner,
-                systemChannelId: guild.systemChannelId,
-                botJoinedAt: guild.botJoinedAt
-            }, {
-                where: {
-                    id: guild.id
-                },
-                transaction: t
-            });
+            await t.commit();
         } catch (e) {
-            GlobalLogger.root.error("GuildManager.syncCacheEntry Error Updating StorageGuild:", e);
+            GlobalLogger.root.error("GuildManager.destroy Error:", e, "\nTransaction:", t);
             await t.rollback();
         }
 
-        await t.commit();
+        await super.destroy();
+    }
+
+    private async onCacheEntryDeleted(discordId: string, guild: Guild, transaction?: Transaction) {
+        await StorageGuild.update({
+            id: guild.id,
+            group: guild.group,
+            name: guild.name,
+            lang: guild.lang,
+            ownerId: guild.ownerId,
+            icon: guild.icon,
+            banner: guild.banner,
+            systemChannelId: guild.systemChannelId,
+            botJoinedAt: guild.botJoinedAt
+        }, {
+            where: {
+                id: guild.id
+            },
+            transaction
+        }).catch(err => GlobalLogger.root.error("GuildManager.syncCacheEntry Error Updating StorageGuild:", err));
     }
 }
